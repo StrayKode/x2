@@ -1,0 +1,1184 @@
+using UnityEngine;
+
+public class BadEndingTrigger : MonoBehaviour
+{
+    private void OnTriggerEnter2D(Collider2D collision)
+    {
+        if (collision.CompareTag("Player") && PlayerPrefs.GetInt("BossDialogue", 0) == 1)
+        {
+            EventManager.TriggerBadEnding();
+        }
+    }
+}using UnityEngine;
+
+public class BombObstacle : MonoBehaviour
+{
+    [Header("Bomb Settings")]
+    [SerializeField] private float countdownTime = 3f;
+    [SerializeField] private int damage = 2;
+
+    [Header("Visual Effects")]
+    [SerializeField] private GameObject explosionEffect;
+    [SerializeField] private Animator animator;
+
+    private bool isCountingDown;
+
+    private void Start()
+    {
+        isCountingDown = false;
+    }
+
+    private void OnTriggerEnter2D(Collider2D collision)
+    {
+        if (collision.CompareTag("Player") && !isCountingDown)
+        {
+            StartCountdown();
+        }
+    }
+
+    private void StartCountdown()
+    {
+        isCountingDown = true;
+        animator.SetBool("CountingDown", true);
+        Invoke(nameof(Explode), countdownTime);
+    }
+
+    private void Explode()
+    {
+        if (explosionEffect != null)
+        {
+            Instantiate(explosionEffect, transform.position, Quaternion.identity);
+        }
+
+        Collider2D[] colliders = Physics2D.OverlapCircleAll(transform.position, 1.5f);
+        foreach (Collider2D collider in colliders)
+        {
+            if (collider.CompareTag("Player"))
+            {
+                collider.GetComponent<PlayerHealth>()?.TakeDamage(damage);
+            }
+        }
+
+        Destroy(gameObject);
+    }
+}using UnityEngine;
+using System.Collections;
+using System.Collections.Generic;
+
+public class BombsAttack : MonoBehaviour
+{
+    [Header("Bomb Settings")]
+    [SerializeField] private GameObject bombPrefab; // Prefab de la bomba
+    [SerializeField] private Transform[] bombPoints; // Puntos de aparición de bombas
+    [SerializeField] private int minBombs = 3; // Mínimo de bombas
+    [SerializeField] private int maxBombs = 6; // Máximo de bombas
+    [SerializeField] private float spawnDelay = 0.2f; // Retardo entre apariciones
+
+    [Header("References")]
+    [SerializeField] private BossAttacksManager bossAttacksManager; // Referencia al sistema de ataques del jefe
+
+    private Coroutine currentCoroutine;
+
+    public void StartBombsAttack()
+    {
+        if (currentCoroutine != null)
+        {
+            StopCoroutine(currentCoroutine);
+        }
+        currentCoroutine = StartCoroutine(ActivateBombs());
+    }
+
+    private IEnumerator ActivateBombs()
+    {
+        int bombsToSpawn = Random.Range(minBombs, maxBombs + 1);
+        List<GameObject> spawnedBombs = new List<GameObject>();
+
+        for (int i = 0; i < bombsToSpawn; i++)
+        {
+            if (i >= bombPoints.Length) break;
+
+            GameObject bomb = Instantiate(bombPrefab, bombPoints[i].position, Quaternion.identity);
+            spawnedBombs.Add(bomb);
+
+            yield return new WaitForSeconds(spawnDelay);
+        }
+
+        yield return new WaitForSeconds(1.5f);
+
+        // Iniciar cuenta atrás en todas las bombas
+        foreach (GameObject bomb in spawnedBombs)
+        {
+            if (bomb != null)
+            {
+                BombScript bombScript = bomb.GetComponent<BombScript>();
+                if (bombScript != null)
+                {
+                    bombScript.StartCountdown();
+                }
+            }
+        }
+
+        // Notificar al sistema de ataques del jefe
+        yield return new WaitForSeconds(3f);
+        bossAttacksManager.StartNewAttack();
+    }
+}using UnityEngine;
+
+public class BombScript : MonoBehaviour
+{
+    [Header("Bomb Settings")]
+    [SerializeField] private float countdownTime = 3f; // Tiempo de cuenta atrás
+    [SerializeField] private int damage = 1; // Daño al jugador
+    [SerializeField] private float explosionRadius = 1.5f; // Radio de explosión
+
+    [Header("References")]
+    [SerializeField] private Animator animator; // Animador para animaciones de cuenta atrás y explosión
+    [SerializeField] private GameObject explosionEffect; // Efecto visual de explosión
+
+    private bool isCountingDown = false;
+    private bool isExploding = false;
+
+    private void Start()
+    {
+        if (animator == null)
+        {
+            animator = GetComponent<Animator>();
+        }
+    }
+
+    private void OnTriggerEnter2D(Collider2D collision)
+    {
+        if (!isCountingDown && collision.CompareTag("Player"))
+        {
+            StartCountdown();
+        }
+    }
+
+    public void StartCountdown()
+    {
+        isCountingDown = true;
+        animator.SetBool("CountingDown", true);
+        Invoke(nameof(Explode), countdownTime);
+    }
+
+    private void Explode()
+    {
+        if (isExploding) return;
+
+        isExploding = true;
+
+        // Activar animación de explosión
+        animator.SetBool("Explode", true);
+
+        // Mostrar efecto visual de explosión
+        if (explosionEffect != null)
+        {
+            Instantiate(explosionEffect, transform.position, Quaternion.identity);
+        }
+
+        // Aplicar daño a los objetos en el radio de explosión
+        Collider2D[] colliders = Physics2D.OverlapCircleAll(transform.position, explosionRadius);
+        foreach (Collider2D collider in colliders)
+        {
+            if (collider.CompareTag("Player"))
+            {
+                collider.GetComponent<PlayerHealth>()?.TakeDamage(damage);
+            }
+        }
+
+        // Destruir la bomba después de la animación
+        Destroy(gameObject, 0.5f);
+    }
+}using UnityEngine;
+using System.Collections;
+
+public class BossAttacksManager : MonoBehaviour
+{
+    [Header("Attack Options")]
+    [SerializeField] private BombsAttack bombsAttack;
+    [SerializeField] private LasersAttack lasersAttack;
+    [SerializeField] private BulletBossAttack bulletBossAttack;
+    [SerializeField] private EnemySpawnAttack enemySpawnAttack;
+
+    [Header("General Settings")]
+    [SerializeField] private float attackCooldown = 4f; // Tiempo entre ataques
+    [SerializeField] private BossHealth bossHealth; // Referencia al sistema de salud del jefe
+    [SerializeField] private Collider2D detectionCollider; // Collider para detectar al jugador
+
+    private bool isAttacking = false;
+    private bool playerDetected = false;
+
+    private void OnTriggerEnter2D(Collider2D collision)
+    {
+        if (collision.CompareTag("Player") && !playerDetected && bossHealth.CurrentHealth > 0)
+        {
+            playerDetected = true;
+            StartCoroutine(StartAttacks());
+        }
+    }
+
+    private IEnumerator StartAttacks()
+    {
+        yield return new WaitForSeconds(2f); // Retardo inicial antes de atacar
+
+        while (bossHealth.CurrentHealth > 0 && playerDetected)
+        {
+            StartRandomAttack();
+            yield return new WaitForSeconds(attackCooldown);
+        }
+    }
+
+    private void StartRandomAttack()
+    {
+        if (isAttacking || bossHealth.CurrentHealth <= 0) return;
+
+        isAttacking = true;
+
+        // Seleccionar un ataque aleatorio
+        int randomAttack = Random.Range(1, 5);
+        switch (randomAttack)
+        {
+            case 1:
+                bombsAttack.StartBombsAttack();
+                break;
+            case 2:
+                lasersAttack.StartLaserAttack();
+                break;
+            case 3:
+                bulletBossAttack.StartBulletAttack();
+                break;
+            case 4:
+                enemySpawnAttack.StartEnemySpawn();
+                break;
+        }
+
+        // Reiniciar el estado de ataque después del cooldown
+        StartCoroutine(ResetAttackState());
+    }
+
+    private IEnumerator ResetAttackState()
+    {
+        yield return new WaitForSeconds(attackCooldown);
+        isAttacking = false;
+    }
+}using UnityEngine;
+
+public class BossBattle : MonoBehaviour
+{
+    [Header("References")]
+    [SerializeField] private GameObject tileMap; // Tilemap que se activa/desactiva
+    [SerializeField] private BossHealth bossHealth; // Salud del jefe
+    [SerializeField] private BossAttacksManager bossAttacksManager; // Sistema de ataques del jefe
+
+    private void Start()
+    {
+        tileMap.SetActive(false); // Inicialmente desactivado
+    }
+
+    private void Update()
+    {
+        if (bossHealth.CurrentHealth <= 0)
+        {
+            tileMap.SetActive(false); // Desactivar tilemap si el jefe muere
+        }
+        else if (bossAttacksManager.PlayerDetected)
+        {
+            tileMap.SetActive(true); // Activar tilemap cuando el jugador es detectado
+        }
+    }
+}using UnityEngine;
+
+public class BossHealth : MonoBehaviour
+{
+    [Header("Health Settings")]
+    [SerializeField] private int maxHealth = 150;
+    private int currentHealth;
+
+    [Header("References")]
+    [SerializeField] private Animator animator; // Animador del jefe
+
+    public int CurrentHealth => currentHealth;
+
+    private void Start()
+    {
+        currentHealth = maxHealth;
+    }
+
+    public void TakeDamage(int damage)
+    {
+        currentHealth -= damage;
+
+        if (currentHealth <= 0)
+        {
+            Die();
+        }
+        else
+        {
+            animator.SetTrigger("Hurt");
+        }
+    }
+
+    private void Die()
+    {
+        animator.SetBool("Dead", true);
+        // Lógica adicional para manejar la muerte del jefe
+    }
+}using UnityEngine;
+
+public class DamageCollision : MonoBehaviour
+{
+    public int damage = 1;
+    public float cooldown = 1f;
+    private float nextDamageTime;
+
+    private void OnCollisionStay2D(Collision2D collision)
+    {
+        if (collision.collider.CompareTag("Player") && Time.time >= nextDamageTime)
+        {
+            collision.collider.GetComponent<PlayerHealth>().TakeDamage(damage);
+            nextDamageTime = Time.time + cooldown;
+        }
+    }
+}using System.Collections;
+using UnityEngine;
+using TMPro;
+
+public class DialogueSystem : MonoBehaviour
+{
+    [Header("UI References")]
+    [SerializeField] private TMP_Text dialogueText;
+    [SerializeField] private GameObject dialoguePanel;
+    [SerializeField] private GameObject dialogueMark;
+
+    [Header("Settings")]
+    [SerializeField] private string[] dialogueLines;
+    [SerializeField] private float typingSpeed = 0.05f;
+
+    private int currentLineIndex;
+    private bool isPlayerInRange;
+    private bool isDialogueActive;
+
+    private void Update()
+    {
+        if (isPlayerInRange && Input.GetButtonDown("Fire1"))
+        {
+            if (!isDialogueActive)
+            {
+                StartDialogue();
+            }
+            else if (dialogueText.text == dialogueLines[currentLineIndex])
+            {
+                ShowNextLine();
+            }
+            else
+            {
+                StopAllCoroutines();
+                dialogueText.text = dialogueLines[currentLineIndex];
+            }
+        }
+    }
+
+    private void OnTriggerEnter2D(Collider2D collision)
+    {
+        if (collision.CompareTag("Player"))
+        {
+            isPlayerInRange = true;
+            dialogueMark.SetActive(true);
+        }
+    }
+
+    private void OnTriggerExit2D(Collider2D collision)
+    {
+        if (collision.CompareTag("Player"))
+        {
+            isPlayerInRange = false;
+            dialogueMark.SetActive(false);
+        }
+    }
+
+    private void StartDialogue()
+    {
+        isDialogueActive = true;
+        dialoguePanel.SetActive(true);
+        dialogueMark.SetActive(false);
+        currentLineIndex = 0;
+        StartCoroutine(TypeLine());
+    }
+
+    private IEnumerator TypeLine()
+    {
+        dialogueText.text = string.Empty;
+
+        foreach (char letter in dialogueLines[currentLineIndex])
+        {
+            dialogueText.text += letter;
+            yield return new WaitForSeconds(typingSpeed);
+        }
+    }
+
+    private void ShowNextLine()
+    {
+        currentLineIndex++;
+
+        if (currentLineIndex < dialogueLines.Length)
+        {
+            StartCoroutine(TypeLine());
+        }
+        else
+        {
+            EndDialogue();
+        }
+    }
+
+    private void EndDialogue()
+    {
+        isDialogueActive = false;
+        dialoguePanel.SetActive(false);
+        dialogueMark.SetActive(true);
+    }
+}using UnityEngine;
+
+public class EnemyController : MonoBehaviour
+{
+    [Header("Health Settings")]
+    [SerializeField] private int maxHealth = 10;
+
+    private int currentHealth;
+
+    [Header("Visual Effects")]
+    [SerializeField] private GameObject deathParticles;
+
+    private void Start()
+    {
+        currentHealth = maxHealth;
+    }
+
+    public void TakeDamage(int damage)
+    {
+        currentHealth -= damage;
+        if (currentHealth <= 0)
+        {
+            Die();
+        }
+    }
+
+    private void Die()
+    {
+        Instantiate(deathParticles, transform.position, Quaternion.identity);
+        EventManager.TriggerEnemyDefeated(GetInstanceID());
+        Destroy(gameObject);
+    }
+}using System.Collections;
+using UnityEngine;
+
+public class EnemyHealth : MonoBehaviour
+{
+    public int maxHealth = 3;
+    public int currentHealth = 3;
+    public Animator animator;
+    private Grunt grunt;
+
+    void Start()
+    {
+        currentHealth = Mathf.Max(currentHealth, maxHealth);
+        grunt = GetComponent<Grunt>();
+    }
+
+    public void TakeDamage(int amount)
+    {
+        currentHealth -= amount;
+        currentHealth = Mathf.Max(currentHealth, 0);
+
+        StartCoroutine(HurtSequence());
+
+        if (currentHealth == 0)
+            StartCoroutine(Die());
+    }
+
+    private IEnumerator Die()
+    {
+        animator.SetBool("isDead", true);
+        yield return new WaitForSeconds(0.2f);
+        grunt.enabled = false;
+        Destroy(gameObject);
+    }
+
+    private IEnumerator HurtSequence()
+    {
+        animator.SetTrigger("hurt");
+        yield return null;
+    }
+}using UnityEngine;
+
+public abstract class EntityController : MonoBehaviour
+{
+    [SerializeField] protected int maxHealth = 100;
+    protected int currentHealth;
+
+    protected Animator animator;
+
+    protected virtual void Start()
+    {
+        currentHealth = maxHealth;
+        animator = GetComponent<Animator>();
+    }
+
+    public virtual void TakeDamage(int damage)
+    {
+        currentHealth -= damage;
+        currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth);
+
+        if (currentHealth <= 0)
+        {
+            Die();
+        }
+    }
+
+    protected abstract void Die();
+}using System;
+
+public static class EventManager
+{
+    // Otros eventos existentes...
+
+    // Evento para bombas activadas
+    public static event Action OnBombsActivated;
+
+    public static void TriggerBombsActivated()
+    {
+        OnBombsActivated?.Invoke();
+    }
+}using UnityEngine;
+
+public class FinalMenu : MonoBehaviour
+{
+    [Header("UI Panels")]
+    [SerializeField] private GameObject goodEndingPanel;
+    [SerializeField] private GameObject badEndingPanel;
+
+    [Header("Settings")]
+    [SerializeField] private float delayBeforeShow = 2.5f;
+
+    private void OnEnable()
+    {
+        EventManager.OnGoodEndingTriggered += ShowGoodEnding;
+        EventManager.OnBadEndingTriggered += ShowBadEnding;
+    }
+
+    private void OnDisable()
+    {
+        EventManager.OnGoodEndingTriggered -= ShowGoodEnding;
+        EventManager.OnBadEndingTriggered -= ShowBadEnding;
+    }
+
+    private void ShowGoodEnding()
+    {
+        StartCoroutine(ShowEndingCoroutine(goodEndingPanel));
+    }
+
+    private void ShowBadEnding()
+    {
+        StartCoroutine(ShowEndingCoroutine(badEndingPanel));
+    }
+
+    private System.Collections.IEnumerator ShowEndingCoroutine(GameObject endingPanel)
+    {
+        yield return new WaitForSeconds(delayBeforeShow);
+        endingPanel.SetActive(true);
+    }
+}using UnityEngine;
+
+public class Grunt : MonoBehaviour
+{
+    public GameObject player;
+    public GameObject bulletPrefab;
+    public Transform firePoint;
+
+    private float lastShoot;
+
+    void Update()
+    {
+        HandleOrientation();
+        HandleShooting();
+    }
+
+    private void HandleOrientation()
+    {
+        Vector3 direction = player.transform.position - transform.position;
+        transform.localScale = direction.x >= 0 ? Vector3.one : new Vector3(-1.0f, 1.0f, 1.0f);
+    }
+
+    private void HandleShooting()
+    {
+        float distance = Vector3.Distance(player.transform.position, transform.position);
+
+        if (distance < 2.0f && Time.time > lastShoot + 1.0f)
+        {
+            Shoot();
+            lastShoot = Time.time;
+        }
+    }
+
+    private void Shoot()
+    {
+        Vector2 direction = transform.localScale.x == 1.0f ? Vector2.right : Vector2.left;
+        GameObject bullet = Instantiate(bulletPrefab, firePoint.position, Quaternion.identity);
+        bullet.GetComponent<Bullet>().SetDirection(direction);
+    }
+}using UnityEngine;
+
+public class LaserObstacle : MonoBehaviour
+{
+    [Header("Laser Settings")]
+    [SerializeField] private float laserDuration = 3f; // Tiempo que el láser permanece activo
+    [SerializeField] private float cooldownDuration = 2f; // Tiempo entre activaciones
+
+    [Header("Visual Effects")]
+    [SerializeField] private GameObject laserBody;
+    [SerializeField] private GameObject laserBeam;
+
+    private bool isActive;
+
+    private void Start()
+    {
+        laserBody.SetActive(false);
+        laserBeam.SetActive(false);
+        StartCoroutine(LaserCycle());
+    }
+
+    private IEnumerator LaserCycle()
+    {
+        while (true)
+        {
+            yield return new WaitForSeconds(cooldownDuration);
+            ActivateLaser();
+
+            yield return new WaitForSeconds(laserDuration);
+            DeactivateLaser();
+        }
+    }
+
+    private void ActivateLaser()
+    {
+        isActive = true;
+        laserBody.SetActive(true);
+        laserBeam.SetActive(true);
+    }
+
+    private void DeactivateLaser()
+    {
+        isActive = false;
+        laserBody.SetActive(false);
+        laserBeam.SetActive(false);
+    }
+}using UnityEngine;
+using System.Collections;
+using System.Collections.Generic;
+
+public class LasersAttack : MonoBehaviour
+{
+    [Header("Laser Settings")]
+    [SerializeField] private GameObject laserPrefab; // Prefab del láser
+    [SerializeField] private Transform[] laserPoints; // Puntos donde aparecen los lásers
+    [SerializeField] private int minLasers = 3; // Mínimo de lásers por ataque
+    [SerializeField] private int maxLasers = 6; // Máximo de lásers por ataque
+    [SerializeField] private float minDelay = 0.2f; // Retardo mínimo entre lásers
+    [SerializeField] private float maxDelay = 0.5f; // Retardo máximo entre lásers
+
+    [Header("References")]
+    [SerializeField] private BossAttacksManager bossAttacksManager; // Referencia al sistema del jefe
+
+    private Coroutine currentCoroutine;
+
+    public void StartLaserAttack()
+    {
+        if (currentCoroutine != null)
+        {
+            StopCoroutine(currentCoroutine);
+        }
+        currentCoroutine = StartCoroutine(ActivateLasers());
+    }
+
+    private IEnumerator ActivateLasers()
+    {
+        int lasersToSpawn = Random.Range(minLasers, maxLasers + 1);
+        List<GameObject> activeLasers = new List<GameObject>();
+
+        for (int i = 0; i < lasersToSpawn; i++)
+        {
+            if (i >= laserPoints.Length) break;
+
+            GameObject laser = Instantiate(laserPrefab, laserPoints[i].position, Quaternion.identity);
+            activeLasers.Add(laser);
+
+            float randomDelay = Random.Range(minDelay, maxDelay);
+            yield return new WaitForSeconds(randomDelay);
+        }
+
+        yield return new WaitForSeconds(3f); // Tiempo para que los lásers permanezcan activos
+
+        // Destruir los lásers después del ataque
+        foreach (GameObject laser in activeLasers)
+        {
+            if (laser != null)
+            {
+                Destroy(laser);
+            }
+        }
+
+        // Notificar al sistema del jefe para continuar con el siguiente ataque
+        bossAttacksManager.StartNewAttack();
+    }
+}using UnityEngine;
+
+public class Level3NPC : MonoBehaviour
+{
+    private void OnInteract()
+    {
+        PlayerPrefs.SetInt("BossDialogue", 1);
+        PlayerPrefs.Save();
+    }
+}using UnityEngine;
+
+public class MageBullet : MonoBehaviour
+{
+    public float speed = 8f;
+    public int damage = 1;
+    public float bulletStrength = 0.02f;
+    public Transform target;
+
+    private Rigidbody2D rb;
+    private Vector2 currentDirection;
+
+    void Start()
+    {
+        rb = GetComponent<Rigidbody2D>();
+        target = GameObject.FindGameObjectWithTag("Player").transform;
+
+        if (target != null)
+            currentDirection = (target.position - transform.position).normalized;
+
+        rb.velocity = currentDirection * speed;
+    }
+
+    void FixedUpdate()
+    {
+        if (target == null) return;
+
+        Vector2 targetDirection = ((Vector2)target.position - rb.position).normalized;
+        currentDirection = Vector2.Lerp(currentDirection, targetDirection, bulletStrength);
+        rb.velocity = currentDirection * speed;
+    }
+
+    void OnTriggerEnter2D(Collider2D collision)
+    {
+        if (collision.CompareTag("Player"))
+            collision.GetComponent<PlayerHealth>()?.TakeDamage(damage);
+
+        Destroy(gameObject);
+    }
+}using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public class MainMenu : MonoBehaviour
+{
+    [Header("UI Panels")]
+    [SerializeField] private GameObject mainMenuPanel;
+    [SerializeField] private GameObject settingsPanel;
+
+    public void StartNewGame()
+    {
+        PlayerPrefs.SetInt("HasGun", 0);
+        PlayerPrefs.SetInt("BossDialogue", 0);
+        SceneManager.LoadScene("Level 1");
+    }
+
+    public void ContinueGame()
+    {
+        // Cargar datos guardados
+        SaveManager.LoadGame();
+    }
+
+    public void OpenSettings()
+    {
+        mainMenuPanel.SetActive(false);
+        settingsPanel.SetActive(true);
+    }
+
+    public void CloseSettings()
+    {
+        settingsPanel.SetActive(false);
+        mainMenuPanel.SetActive(true);
+    }
+
+    public void ExitGame()
+    {
+        Application.Quit();
+    }
+}using UnityEngine;
+
+public class NPCDialogueSystem : MonoBehaviour
+{
+    [Header("Dialogue Settings")]
+    [SerializeField] private string[] level1Dialogue;
+    [SerializeField] private string[] level2Dialogue;
+    [SerializeField] private string[] level3Dialogue;
+
+    [Header("References")]
+    [SerializeField] private PlayerController playerController;
+    [SerializeField] private GameObject dialoguePanel;
+    [SerializeField] private TMPro.TMP_Text dialogueText;
+
+    private string[] currentDialogue;
+    private int currentLineIndex;
+    private bool didPlayerInteract;
+
+    private void Start()
+    {
+        SetDialogueByLevel();
+    }
+
+    private void SetDialogueByLevel()
+    {
+        string currentLevel = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+
+        if (currentLevel == "Level 1")
+        {
+            currentDialogue = level1Dialogue;
+        }
+        else if (currentLevel == "Level 2")
+        {
+            currentDialogue = level2Dialogue;
+        }
+        else if (currentLevel == "Level 3")
+        {
+            currentDialogue = level3Dialogue;
+        }
+    }
+
+    private void OnTriggerEnter2D(Collider2D collision)
+    {
+        if (collision.CompareTag("Player") && !didPlayerInteract)
+        {
+            StartDialogue();
+        }
+    }
+
+    private void StartDialogue()
+    {
+        dialoguePanel.SetActive(true);
+        currentLineIndex = 0;
+        ShowNextLine();
+    }
+
+    public void ShowNextLine()
+    {
+        if (currentLineIndex < currentDialogue.Length)
+        {
+            dialogueText.text = currentDialogue[currentLineIndex];
+            currentLineIndex++;
+        }
+        else
+        {
+            EndDialogue();
+        }
+    }
+
+    private void EndDialogue()
+    {
+        dialoguePanel.SetActive(false);
+        didPlayerInteract = true;
+
+        // Otorgar mejora según el nivel
+        GrantUpgrade();
+    }
+
+    private void GrantUpgrade()
+    {
+        string currentLevel = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+
+        if (currentLevel == "Level 1")
+        {
+            playerController.UnlockGun();
+        }
+        else if (currentLevel == "Level 2")
+        {
+            playerController.IncreaseJumpForce(1.5f); // Mejora de salto
+        }
+        else if (currentLevel == "Level 3")
+        {
+            PlayerPrefs.SetInt("BossDialogue", 1); // Activar estado para el final malo
+            PlayerPrefs.Save();
+        }
+    }
+}using System.Collections.Generic;
+using UnityEngine;
+
+[ExecuteInEditMode]
+public class ParallaxBackground : MonoBehaviour
+{
+    public ParallaxCamera parallaxCamera;
+    private readonly List<ParallaxLayer> parallaxLayers = new();
+
+    void Start()
+    {
+        if (parallaxCamera == null)
+            parallaxCamera = Camera.main.GetComponent<ParallaxCamera>();
+
+        if (parallaxCamera != null)
+            parallaxCamera.onCameraTranslate += Move;
+
+        SetLayers();
+    }
+
+    private void SetLayers()
+    {
+        parallaxLayers.Clear();
+
+        for (int i = 0; i < transform.childCount; i++)
+        {
+            ParallaxLayer layer = transform.GetChild(i).GetComponent<ParallaxLayer>();
+            if (layer != null)
+            {
+                layer.name = "Layer-" + i;
+                parallaxLayers.Add(layer);
+            }
+        }
+    }
+
+    private void Move(float delta)
+    {
+        foreach (ParallaxLayer layer in parallaxLayers)
+        {
+            layer.Move(delta);
+        }
+    }
+}using UnityEngine;
+
+[ExecuteInEditMode]
+public class ParallaxCamera : MonoBehaviour
+{
+    public delegate void ParallaxCameraDelegate(float deltaMovement);
+    public ParallaxCameraDelegate onCameraTranslate;
+
+    private float oldPosition;
+
+    void Start()
+    {
+        oldPosition = transform.position.x;
+    }
+
+    void Update()
+    {
+        if (transform.position.x != oldPosition)
+        {
+            onCameraTranslate?.Invoke(oldPosition - transform.position.x);
+            oldPosition = transform.position.x;
+        }
+    }
+}using UnityEngine;
+
+[ExecuteInEditMode]
+public class ParallaxLayer : MonoBehaviour
+{
+    public float parallaxFactor;
+
+    public void Move(float delta)
+    {
+        Vector3 newPos = transform.localPosition;
+        newPos.x -= delta * parallaxFactor;
+        transform.localPosition = newPos;
+    }
+}using UnityEngine;
+
+public class PlayerController : MonoBehaviour
+{
+    // (Resto del código se mantiene igual, excepto las nuevas funciones añadidas)
+
+    public void UnlockGun()
+    {
+        playerHasGun = true;
+        Debug.Log("Gun unlocked!");
+    }
+
+    public void IncreaseJumpForce(float additionalForce)
+    {
+        jumpForce += additionalForce;
+        Debug.Log($"Jump force increased by {additionalForce}!");
+    }
+}using UnityEngine;
+
+public class PlayerHealth : MonoBehaviour
+{
+    [Header("Health Settings")]
+    [SerializeField] private int maxHealth = 6;
+
+    private int currentHealth;
+    private bool isInvulnerable;
+
+    private Animator animator;
+
+    public bool IsDead() => currentHealth <= 0;
+
+    private void Start()
+    {
+        currentHealth = maxHealth;
+        animator = GetComponent<Animator>();
+    }
+
+    public void TakeDamage(int damage)
+    {
+        if (isInvulnerable || IsDead()) return;
+
+        currentHealth -= damage;
+        currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth);
+
+        if (IsDead())
+        {
+            Die();
+        }
+        else
+        {
+            StartCoroutine(InvulnerabilityCoroutine());
+        }
+    }
+
+    private void Die()
+    {
+        animator.SetTrigger("death");
+        // Trigger game over or respawn logic
+    }
+
+    private System.Collections.IEnumerator InvulnerabilityCoroutine()
+    {
+        isInvulnerable = true;
+        yield return new WaitForSeconds(1.5f); // Invulnerability time
+        isInvulnerable = false;
+    }
+}using UnityEngine;
+
+public class ScreenShakeManager : MonoBehaviour
+{
+    public static ScreenShakeManager Instance;
+
+    private void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
+
+    public void TriggerShake(float intensity, float duration)
+    {
+        StartCoroutine(ShakeCoroutine(intensity, duration));
+    }
+
+    private IEnumerator ShakeCoroutine(float intensity, float duration)
+    {
+        Vector3 originalPosition = Camera.main.transform.position;
+
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            float x = Random.Range(-1f, 1f) * intensity;
+            float y = Random.Range(-1f, 1f) * intensity;
+
+            Camera.main.transform.position = new Vector3(originalPosition.x + x, originalPosition.y + y, originalPosition.z);
+
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        Camera.main.transform.position = originalPosition;
+    }
+}using UnityEngine;
+using TMPro;
+
+public class SettingsMenu : MonoBehaviour
+{
+    [Header("UI Elements")]
+    [SerializeField] private TMP_Dropdown languageDropdown;
+    [SerializeField] private UnityEngine.UI.Slider volumeSlider;
+
+    private void Start()
+    {
+        // Inicializar idioma y volumen
+        int savedLanguage = PlayerPrefs.GetInt("LanguageKey", 0);
+        languageDropdown.value = savedLanguage;
+
+        float savedVolume = PlayerPrefs.GetFloat("Volume", 0.5f);
+        volumeSlider.value = savedVolume;
+
+        // Configurar eventos
+        languageDropdown.onValueChanged.AddListener(ChangeLanguage);
+        volumeSlider.onValueChanged.AddListener(ChangeVolume);
+    }
+
+    private void ChangeLanguage(int languageID)
+    {
+        PlayerPrefs.SetInt("LanguageKey", languageID);
+        PlayerPrefs.Save();
+        EventManager.TriggerLanguageChanged(languageID);
+    }
+
+    private void ChangeVolume(float volume)
+    {
+        PlayerPrefs.SetFloat("Volume", volume);
+        PlayerPrefs.Save();
+        EventManager.TriggerVolumeChanged(volume);
+    }
+}using UnityEngine;
+
+public class SlimeControl : MonoBehaviour
+{
+    public float velocity = 5f;
+    private Rigidbody2D rb;
+    private int direction = -1;
+
+    void Start()
+    {
+        rb = GetComponent<Rigidbody2D>();
+    }
+
+    void Update()
+    {
+        Move();
+    }
+
+    private void Move()
+    {
+        rb.velocity = new Vector2(direction * velocity, rb.velocity.y);
+        transform.localScale = new Vector3(direction == -1 ? 1.0f : -1.0f, 1.0f, 1.0f);
+    }
+
+    private void OnTriggerEnter2D(Collider2D collision)
+    {
+        if (collision.CompareTag("Obstacle") || collision.CompareTag("Player"))
+        {
+            direction *= -1;
+        }
+
+        if (collision.CompareTag("Player"))
+        {
+            collision.GetComponent<PlayerHealth>()?.TakeDamage(1);
+        }
+    }
+}using UnityEngine;
+
+public class Spikes : MonoBehaviour
+{
+    [SerializeField] private int damage = 1;
+
+    private void OnTriggerEnter2D(Collider2D collision)
+    {
+        if (collision.CompareTag("Player"))
+        {
+            collision.GetComponent<PlayerHealth>()?.TakeDamage(damage);
+        }
+    }
+}
